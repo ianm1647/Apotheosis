@@ -1,7 +1,9 @@
 package dev.shadowsoffire.apotheosis;
 
-import java.util.function.Supplier;
+import java.util.function.Predicate;
+import java.util.function.UnaryOperator;
 
+import com.google.common.base.Predicates;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 
@@ -38,6 +40,7 @@ import dev.shadowsoffire.apotheosis.item.PotionCharmItem;
 import dev.shadowsoffire.apotheosis.item.TooltipItem;
 import dev.shadowsoffire.apotheosis.loot.AffixLootPoolEntry;
 import dev.shadowsoffire.apotheosis.loot.GemLootPoolEntry;
+import dev.shadowsoffire.apotheosis.loot.LootCategory;
 import dev.shadowsoffire.apotheosis.loot.LootRarity;
 import dev.shadowsoffire.apotheosis.loot.RarityRegistry;
 import dev.shadowsoffire.apotheosis.loot.conditions.KilledByRealPlayerCondition;
@@ -48,6 +51,7 @@ import dev.shadowsoffire.apotheosis.loot.modifiers.AffixLootModifier;
 import dev.shadowsoffire.apotheosis.loot.modifiers.GemLootModifier;
 import dev.shadowsoffire.apotheosis.mobs.BossSpawnerBlock;
 import dev.shadowsoffire.apotheosis.mobs.BossSpawnerBlock.BossSpawnerTile;
+import dev.shadowsoffire.apotheosis.mobs.InvaderSpawnRules;
 import dev.shadowsoffire.apotheosis.recipe.CharmInfusionRecipe;
 import dev.shadowsoffire.apotheosis.recipe.PotionCharmRecipe;
 import dev.shadowsoffire.apotheosis.socket.AddSocketsRecipe;
@@ -68,12 +72,16 @@ import dev.shadowsoffire.apotheosis.tiers.augments.TierAugment;
 import dev.shadowsoffire.apotheosis.util.AffixItemIngredient;
 import dev.shadowsoffire.apotheosis.util.GemIngredient;
 import dev.shadowsoffire.apotheosis.util.SingletonRecipeSerializer;
+import dev.shadowsoffire.apothic_attributes.api.ALObjects;
+import dev.shadowsoffire.apothic_attributes.modifiers.EntitySlotGroup;
 import dev.shadowsoffire.placebo.block_entity.TickingBlockEntityType.TickSide;
 import dev.shadowsoffire.placebo.registry.DeferredHelper;
 import dev.shadowsoffire.placebo.reload.DynamicHolder;
 import net.minecraft.advancements.critereon.ItemSubPredicate;
 import net.minecraft.core.Holder;
+import net.minecraft.core.Registry;
 import net.minecraft.core.component.DataComponentType;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
@@ -85,16 +93,26 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.damagesource.DamageType;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.inventory.MenuType;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CreativeModeTab;
+import net.minecraft.world.item.CrossbowItem;
+import net.minecraft.world.item.Equipable;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Rarity;
+import net.minecraft.world.item.TridentItem;
+import net.minecraft.world.item.component.ItemAttributeModifiers;
 import net.minecraft.world.item.component.ItemContainerContents;
 import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.level.block.AbstractSkullBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.levelgen.feature.Feature;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureProcessorType;
 import net.minecraft.world.level.storage.loot.LootTable;
@@ -102,8 +120,10 @@ import net.minecraft.world.level.storage.loot.entries.LootPoolEntryType;
 import net.minecraft.world.level.storage.loot.predicates.LootItemConditionType;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.attachment.AttachmentType;
+import net.neoforged.neoforge.common.ItemAbilities;
 import net.neoforged.neoforge.common.crafting.IngredientType;
 import net.neoforged.neoforge.registries.NeoForgeRegistries;
+import net.neoforged.neoforge.registries.datamaps.DataMapType;
 
 /**
  * Object Holder Class. For the main mod class, see {@link Apotheosis}
@@ -111,6 +131,13 @@ import net.neoforged.neoforge.registries.NeoForgeRegistries;
 public class Apoth {
 
     public static final DeferredHelper R = DeferredHelper.create(Apotheosis.MODID);
+
+    public static final class BuiltInRegs {
+
+        public static final Registry<LootCategory> LOOT_CATEGORY = R.registry("loot_category", b -> b.defaultKey(Apotheosis.loc("none")).onBake(LootCategory.Inner.rebuildSortedValueList()).sync(true));
+
+        private static void bootstrap() {}
+    }
 
     public static final class Components {
 
@@ -127,8 +154,6 @@ public class Apoth {
         public static final DataComponentType<DynamicHolder<Gem>> GEM = R.component("gem", b -> b.persistent(GemRegistry.INSTANCE.holderCodec()).networkSynchronized(GemRegistry.INSTANCE.holderStreamCodec()));
 
         public static final DataComponentType<Purity> PURITY = R.component("purity", b -> b.persistent(Purity.CODEC).networkSynchronized(Purity.STREAM_CODEC));
-
-        public static final DataComponentType<Boolean> FESTIVE_MARKER = R.component("festive_marker", b -> b.networkSynchronized(ByteBufCodecs.BOOL)); // TODO: When sync can be disabled, disable it
 
         public static final DataComponentType<Float> DURABILITY_BONUS = R.component("durability_bonus", b -> b.persistent(Codec.floatRange(0, 1)).networkSynchronized(ByteBufCodecs.FLOAT));
 
@@ -348,8 +373,8 @@ public class Apoth {
     }
 
     public static final class EntitySubPredicates {
-        public static final Supplier<MapCodec<MonsterPredicate>> IS_MONSTER = R.custom("is_monster", Registries.ENTITY_SUB_PREDICATE_TYPE, () -> MonsterPredicate.CODEC);
-        public static final Supplier<MapCodec<InvaderPredicate>> IS_INVADER = R.custom("is_invader", Registries.ENTITY_SUB_PREDICATE_TYPE, () -> InvaderPredicate.CODEC);
+        public static final MapCodec<MonsterPredicate> IS_MONSTER = R.custom("is_monster", Registries.ENTITY_SUB_PREDICATE_TYPE, MonsterPredicate.CODEC);
+        public static final MapCodec<InvaderPredicate> IS_INVADER = R.custom("is_invader", Registries.ENTITY_SUB_PREDICATE_TYPE, InvaderPredicate.CODEC);
 
         private static void bootstrap() {}
     }
@@ -382,6 +407,8 @@ public class Apoth {
         public static final TagKey<Block> ROGUE_SPAWNER_COVERS = BlockTags.create(Apotheosis.loc("rogue_spawner_covers"));
         public static final TagKey<Block> STONEFORMING_CANDIDATES = BlockTags.create(Apotheosis.loc("stoneforming_candidates"));
         public static final TagKey<Block> SANDFORMING_CANDIDATES = BlockTags.create(Apotheosis.loc("sandforming_candidates"));
+        public static final TagKey<Block> LEAFFORMING_CANDIDATES = BlockTags.create(Apotheosis.loc("leafforming_candidates"));
+        public static final TagKey<Block> GARDENING_CANDIDATES = BlockTags.create(Apotheosis.loc("gardening_candidates"));
     }
 
     public static final class DamageTypes {
@@ -398,9 +425,72 @@ public class Apoth {
         public static final ResourceLocation WORLD_TIER_PINNACLE = Apotheosis.loc("progression/pinnacle");
     }
 
+    public static final class LootCategories {
+
+        public static final LootCategory BOW = register("bow", s -> s.getItem() instanceof BowItem || s.getItem() instanceof CrossbowItem, ALObjects.EquipmentSlotGroups.HAND);
+        public static final LootCategory BREAKER = register("breaker", s -> s.canPerformAction(ItemAbilities.PICKAXE_DIG) || s.canPerformAction(ItemAbilities.SHOVEL_DIG), ALObjects.EquipmentSlotGroups.MAINHAND);
+        public static final LootCategory HELMET = register("helmet", armorSlot(EquipmentSlot.HEAD), ALObjects.EquipmentSlotGroups.HEAD);
+        public static final LootCategory CHESTPLATE = register("chestplate", armorSlot(EquipmentSlot.CHEST), ALObjects.EquipmentSlotGroups.CHEST);
+        public static final LootCategory LEGGINGS = register("leggings", armorSlot(EquipmentSlot.LEGS), ALObjects.EquipmentSlotGroups.LEGS);
+        public static final LootCategory BOOTS = register("boots", armorSlot(EquipmentSlot.FEET), ALObjects.EquipmentSlotGroups.FEET);
+        public static final LootCategory SHIELD = register("shield", s -> s.canPerformAction(ItemAbilities.SHIELD_BLOCK), ALObjects.EquipmentSlotGroups.HAND);
+        public static final LootCategory TRIDENT = register("trident", s -> s.getItem() instanceof TridentItem, ALObjects.EquipmentSlotGroups.MAINHAND);
+        public static final LootCategory MELEE_WEAPON = register("melee_weapon", s -> s.canPerformAction(ItemAbilities.SWORD_DIG) || getDefaultModifiers(s).compute(1, EquipmentSlot.MAINHAND) > 1,
+            ALObjects.EquipmentSlotGroups.MAINHAND, 2000);
+        public static final LootCategory SHEARS = register("shears", s -> s.canPerformAction(ItemAbilities.SHEARS_DIG), ALObjects.EquipmentSlotGroups.MAINHAND, 2500);
+        public static final LootCategory NONE = register("none", Predicates.alwaysFalse(), ALObjects.EquipmentSlotGroups.ANY, Integer.MAX_VALUE);
+
+        private static LootCategory register(String path, Predicate<ItemStack> filter, EntitySlotGroup slots, int priority) {
+            return R.custom(path, BuiltInRegs.LOOT_CATEGORY.key(), new LootCategory(filter, slots, priority));
+        }
+
+        private static LootCategory register(String path, Predicate<ItemStack> filter, EntitySlotGroup slots) {
+            return register(path, filter, slots, 1000);
+        }
+
+        private static Predicate<ItemStack> armorSlot(EquipmentSlot slot) {
+            return stack -> {
+                if (stack.is(Items.CARVED_PUMPKIN) || stack.getItem() instanceof BlockItem bi && bi.getBlock() instanceof AbstractSkullBlock) return false;
+
+                EquipmentSlot itemSlot = stack.getEquipmentSlot();
+                if (itemSlot == null) {
+                    Equipable equipable = Equipable.get(stack);
+                    if (equipable != null) {
+                        itemSlot = equipable.getEquipmentSlot();
+                    }
+                }
+
+                return itemSlot == slot;
+            };
+        }
+
+        private static ItemAttributeModifiers getDefaultModifiers(ItemStack stack) {
+            return stack.getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS, stack.getItem().getDefaultAttributeModifiers(stack));
+        }
+
+        private static void bootstrap() {}
+
+    }
+
+    public static final class DataMaps {
+
+        /**
+         * Holds per-dimension spawn rules for Apothic Invaders.
+         */
+        public static final DataMapType<DimensionType, InvaderSpawnRules> INVADER_SPAWN_RULES = R.dataMap("invader_spawn_rules", Registries.DIMENSION_TYPE, InvaderSpawnRules.CODEC, UnaryOperator.identity());
+
+        /**
+         * Holds per-item loot category overrides.
+         */
+        public static final DataMapType<Item, LootCategory> LOOT_CATEGORY_OVERRIDES = R.dataMap("loot_category_overrides", Registries.ITEM, LootCategory.OPTIONAL_CODEC, c -> c.synced(LootCategory.OPTIONAL_CODEC, true));
+
+        private static void bootstrap() {}
+    }
+
     public static void bootstrap(IEventBus bus) {
         bus.register(R);
 
+        BuiltInRegs.bootstrap();
         Attachments.bootstrap();
         Components.bootstrap();
         Blocks.bootstrap();
@@ -419,8 +509,10 @@ public class Apoth {
         RecipeSerializers.bootstrap();
         ItemSubPredicates.bootstrap();
         EntitySubPredicates.bootstrap();
+        LootCategories.bootstrap();
+        DataMaps.bootstrap();
 
-        R.custom("blacklist", NeoForgeRegistries.Keys.BIOME_MODIFIER_SERIALIZERS, () -> BlacklistModifier.CODEC);
+        R.custom("blacklist", NeoForgeRegistries.Keys.BIOME_MODIFIER_SERIALIZERS, BlacklistModifier.CODEC);
     }
 
 }

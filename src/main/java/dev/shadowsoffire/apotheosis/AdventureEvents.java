@@ -3,7 +3,6 @@ package dev.shadowsoffire.apotheosis;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import com.google.common.base.Predicates;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 
 import dev.shadowsoffire.apotheosis.AdventureConfig.ConfigPayload;
@@ -35,13 +34,12 @@ import dev.shadowsoffire.apotheosis.tiers.augments.TierAugment.Target;
 import dev.shadowsoffire.apotheosis.tiers.augments.TierAugmentRegistry;
 import dev.shadowsoffire.apothic_attributes.api.ALObjects;
 import dev.shadowsoffire.apothic_attributes.event.ApotheosisCommandEvent;
+import dev.shadowsoffire.apothic_attributes.modifiers.StackAttributeModifiersEvent;
 import dev.shadowsoffire.placebo.events.AnvilLandEvent;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.ItemInteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.Entity;
@@ -57,7 +55,6 @@ import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.neoforge.event.ItemAttributeModifierEvent;
 import net.neoforged.neoforge.event.OnDatapackSyncEvent;
 import net.neoforged.neoforge.event.enchanting.GetEnchantmentLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityInvulnerabilityCheckEvent;
@@ -73,8 +70,6 @@ import net.neoforged.neoforge.event.entity.living.MobDespawnEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent.BreakSpeed;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent.HarvestCheck;
-import net.neoforged.neoforge.event.entity.player.UseItemOnBlockEvent;
-import net.neoforged.neoforge.event.entity.player.UseItemOnBlockEvent.UsePhase;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.BlockEvent.BreakEvent;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
@@ -99,7 +94,7 @@ public class AdventureEvents {
     }
 
     @SubscribeEvent
-    public void affixModifiers(ItemAttributeModifierEvent e) {
+    public void affixModifiers(StackAttributeModifiersEvent e) {
         ItemStack stack = e.getItemStack();
         SocketHelper.getGems(stack).addModifiers(e);
         AffixHelper.streamAffixes(stack).forEach(inst -> inst.addModifiers(e));
@@ -170,26 +165,6 @@ public class AdventureEvents {
             }
         }
         e.setAmount(amount);
-    }
-
-    @SubscribeEvent
-    public void onItemUse(UseItemOnBlockEvent e) {
-        if (e.getUsePhase() != UsePhase.ITEM_AFTER_BLOCK) {
-            return;
-        }
-
-        ItemStack s = e.getItemStack();
-        InteractionResult socketRes = SocketHelper.getGems(s).onItemUse(e.getUseOnContext());
-        if (socketRes != null) {
-            e.setCanceled(true);
-            e.setCancellationResult(toItemResult(socketRes));
-        }
-
-        InteractionResult afxRes = AffixHelper.streamAffixes(s).map(afx -> afx.onItemUse(e.getUseOnContext())).filter(Predicates.notNull()).findFirst().orElse(null);
-        if (afxRes != null) {
-            e.setCanceled(true);
-            e.setCancellationResult(toItemResult(afxRes));
-        }
     }
 
     @SubscribeEvent
@@ -381,22 +356,6 @@ public class AdventureEvents {
             LivingEntity entity = e.getEntity();
             entity.setData(Attachments.COLD_DAMAGE_TAKEN, entity.getData(Attachments.COLD_DAMAGE_TAKEN) + e.getNewDamage());
         }
-    }
-
-    /**
-     * Conversion from {@link InteractionResult} to {@link ItemInteractionResult} for use in {@link UseItemOnBlockEvent}-based hooks.
-     * <p>
-     * In these cases, the event will immediately convert the IIR back to an IR, so we just need to mirror {@link ItemInteractionResult#result()}.
-     */
-    private static ItemInteractionResult toItemResult(InteractionResult result) {
-        return switch (result) {
-            case SUCCESS -> ItemInteractionResult.SUCCESS;
-            case SUCCESS_NO_ITEM_USED -> ItemInteractionResult.SUCCESS;
-            case CONSUME -> ItemInteractionResult.CONSUME;
-            case CONSUME_PARTIAL -> ItemInteractionResult.CONSUME_PARTIAL;
-            case PASS -> ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-            case FAIL -> ItemInteractionResult.FAIL;
-        };
     }
 
 }

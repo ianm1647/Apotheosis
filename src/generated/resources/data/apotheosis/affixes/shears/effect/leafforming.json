@@ -1,0 +1,16 @@
+{
+    "type": "apotheosis:stoneforming",
+    "candidates": "#apotheosis:leafforming_candidates",
+    "categories": [
+        "apotheosis:shears"
+    ],
+    "definition": {
+        "affix_type": "basic_effect",
+        "exclusive_set": [
+            "apotheosis:shears/effect/gardening"
+        ],
+        "weights": {
+            "weight": 25
+        }
+    }
+}

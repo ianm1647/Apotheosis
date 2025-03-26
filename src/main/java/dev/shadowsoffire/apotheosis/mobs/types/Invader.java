@@ -18,8 +18,11 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import dev.shadowsoffire.apotheosis.AdventureConfig;
 import dev.shadowsoffire.apotheosis.Apoth.Attachments;
 import dev.shadowsoffire.apotheosis.Apoth.Components;
+import dev.shadowsoffire.apotheosis.Apoth.LootCategories;
 import dev.shadowsoffire.apotheosis.Apotheosis;
+import dev.shadowsoffire.apotheosis.affix.Affix;
 import dev.shadowsoffire.apotheosis.affix.AffixHelper;
+import dev.shadowsoffire.apotheosis.affix.ItemAffixes;
 import dev.shadowsoffire.apotheosis.loot.LootCategory;
 import dev.shadowsoffire.apotheosis.loot.LootController;
 import dev.shadowsoffire.apotheosis.loot.LootRarity;
@@ -36,10 +39,12 @@ import dev.shadowsoffire.apotheosis.tiers.augments.TierAugment;
 import dev.shadowsoffire.apotheosis.tiers.augments.TierAugment.Target;
 import dev.shadowsoffire.apotheosis.tiers.augments.TierAugmentRegistry;
 import dev.shadowsoffire.apotheosis.util.NameHelper;
+import dev.shadowsoffire.apothic_attributes.modifiers.EquipmentSlotCompat;
 import dev.shadowsoffire.apothic_enchanting.asm.EnchHooks;
 import dev.shadowsoffire.placebo.codec.CodecProvider;
 import dev.shadowsoffire.placebo.json.ChancedEffectInstance;
 import dev.shadowsoffire.placebo.json.RandomAttributeModifier;
+import dev.shadowsoffire.placebo.reload.DynamicHolder;
 import dev.shadowsoffire.placebo.systems.gear.GearSet;
 import dev.shadowsoffire.placebo.systems.gear.GearSetRegistry;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
@@ -230,7 +235,10 @@ public record Invader(BasicBossData basicData, EntityType<?> entity, AABB size, 
             // We didn't apply an armor set to this invader. We still need to generate an affix item, so we'll pull one at random and equip it.
             ItemStack affixItem = LootController.createRandomLootItem(ctx, rarity);
             LootCategory cat = LootCategory.forItem(affixItem);
-            EquipmentSlot slot = Arrays.stream(EquipmentSlot.values()).filter(cat.getSlots()::test).findAny().orElse(EquipmentSlot.MAINHAND);
+            EquipmentSlot slot = Arrays.stream(EquipmentSlot.values())
+                .filter(eSlot -> cat.getSlots().test(EquipmentSlotCompat.fromVanilla(eSlot)))
+                .findAny()
+                .orElse(EquipmentSlot.MAINHAND);
             mob.setItemSlot(slot, affixItem);
         }
 
@@ -240,7 +248,7 @@ public record Invader(BasicBossData basicData, EntityType<?> entity, AABB size, 
         int tries = 50;
 
         ItemStack temp = mob.getItemBySlot(guaranteed);
-        while (temp.isEmpty() || LootCategory.forItem(temp) == LootCategory.NONE) {
+        while (temp.isEmpty() || LootCategory.forItem(temp) == LootCategories.NONE) {
             guaranteed = slots[rand.nextInt(6)];
             temp = mob.getItemBySlot(guaranteed);
 
@@ -300,6 +308,13 @@ public record Invader(BasicBossData basicData, EntityType<?> entity, AABB size, 
         enchantBossItem(rand, stack, stats.enchLevels().primary(), true, reg);
         NameHelper.setItemName(rand, stack);
         stack = LootController.createLootItem(stack, LootCategory.forItem(stack), rarity, ctx);
+
+        // Upgrade all affixes on Invader items by 10-25%
+        ItemAffixes.Builder builder = stack.getOrDefault(Components.AFFIXES, ItemAffixes.EMPTY).toBuilder();
+        for (DynamicHolder<Affix> afx : builder.keySet()) {
+            builder.upgrade(afx, builder.getLevel(afx) + Mth.nextFloat(rand, 0.1F, 0.25F));
+        }
+        AffixHelper.setAffixes(stack, builder.build());
 
         Component bossOwnerName = Component.translatable(NameHelper.ownershipFormat, bossName);
         Component name = AffixHelper.getName(stack);

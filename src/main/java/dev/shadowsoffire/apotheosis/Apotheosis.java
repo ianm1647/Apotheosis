@@ -1,9 +1,5 @@
 package dev.shadowsoffire.apotheosis;
 
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
-
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -12,10 +8,12 @@ import dev.shadowsoffire.apotheosis.Apoth.Items;
 import dev.shadowsoffire.apotheosis.affix.AffixRegistry;
 import dev.shadowsoffire.apotheosis.compat.GatewaysCompat;
 import dev.shadowsoffire.apotheosis.compat.PatchouliCompat;
+import dev.shadowsoffire.apotheosis.compat.curios.CuriosCompat;
 import dev.shadowsoffire.apotheosis.compat.twilight.AdventureTwilightCompat;
 import dev.shadowsoffire.apotheosis.data.AffixLootEntryProvider;
 import dev.shadowsoffire.apotheosis.data.AffixProvider;
 import dev.shadowsoffire.apotheosis.data.ApothAdvancementProvider;
+import dev.shadowsoffire.apotheosis.data.ApothDataMapProvider;
 import dev.shadowsoffire.apotheosis.data.ApothLootProvider;
 import dev.shadowsoffire.apotheosis.data.ApothRecipeProvider;
 import dev.shadowsoffire.apotheosis.data.ApothTagsProvider;
@@ -25,6 +23,7 @@ import dev.shadowsoffire.apotheosis.data.GearSetProvider;
 import dev.shadowsoffire.apotheosis.data.GemProvider;
 import dev.shadowsoffire.apotheosis.data.InvaderProvider;
 import dev.shadowsoffire.apotheosis.data.PurityWeightsProvider;
+import dev.shadowsoffire.apotheosis.data.RarityOverrideProvider;
 import dev.shadowsoffire.apotheosis.data.RarityProvider;
 import dev.shadowsoffire.apotheosis.data.RogueSpawnerProvider;
 import dev.shadowsoffire.apotheosis.data.TierAugmentProvider;
@@ -33,8 +32,8 @@ import dev.shadowsoffire.apotheosis.data.twilight.TwilightAffixLootProvider;
 import dev.shadowsoffire.apotheosis.data.twilight.TwilightGearSetProvider;
 import dev.shadowsoffire.apotheosis.data.twilight.TwilightInvaderProvider;
 import dev.shadowsoffire.apotheosis.loot.AffixLootRegistry;
-import dev.shadowsoffire.apotheosis.loot.LootCategory;
 import dev.shadowsoffire.apotheosis.loot.LootRule;
+import dev.shadowsoffire.apotheosis.loot.RarityOverrideRegistry;
 import dev.shadowsoffire.apotheosis.loot.RarityRegistry;
 import dev.shadowsoffire.apotheosis.mobs.ApothMobEvents;
 import dev.shadowsoffire.apotheosis.mobs.registries.AugmentRegistry;
@@ -69,13 +68,11 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.attributes.RangedAttribute;
 import net.minecraft.world.item.CreativeModeTabs;
-import net.minecraft.world.item.Item;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.neoforged.fml.event.lifecycle.InterModProcessEvent;
 import net.neoforged.fml.util.ObfuscationReflectionHelper;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
@@ -91,10 +88,6 @@ public class Apotheosis {
     public static final boolean DEBUG_WORLDGEN = "on".equalsIgnoreCase(System.getenv("apotheosis.debug_worldgen"));
     public static final boolean STAGES_LOADED = ModList.get().isLoaded("gamestages");
 
-    static final Map<Item, LootCategory> IMC_TYPE_OVERRIDES = new HashMap<>();
-
-    public static boolean isRunningInDatagen = false;
-
     public Apotheosis(IEventBus bus) {
         Apoth.bootstrap(bus);
         bus.register(this);
@@ -106,11 +99,17 @@ public class Apotheosis {
         if (ModList.get().isLoaded("gateways")) {
             GatewaysCompat.register();
         }
+
         if (ModList.get().isLoaded("twilightforest")) {
             AdventureTwilightCompat.register();
         }
+
         if (ModList.get().isLoaded("patchouli")) {
             PatchouliCompat.register();
+        }
+
+        if (ModList.get().isLoaded("curios")) {
+            CuriosCompat.register(bus);
         }
     }
 
@@ -131,6 +130,7 @@ public class Apotheosis {
         NeoForge.EVENT_BUS.register(new AdventureEvents());
         NeoForge.EVENT_BUS.register(new ApothMobEvents());
         RarityRegistry.INSTANCE.registerToBus();
+        RarityOverrideRegistry.INSTANCE.registerToBus();
         AffixRegistry.INSTANCE.registerToBus();
         GemRegistry.INSTANCE.registerToBus();
         AffixLootRegistry.INSTANCE.registerToBus();
@@ -152,13 +152,13 @@ public class Apotheosis {
 
     @SubscribeEvent
     public void data(GatherDataEvent e) {
-        isRunningInDatagen = true;
         DataProvider.INDENT_WIDTH.set(4);
         DataGenBuilder.create(Apotheosis.MODID)
             .provider(ApothLootProvider::create)
             .provider(ApothRecipeProvider::new)
             .provider(ApothTagsProvider::new)
             .provider(RarityProvider::new)
+            .provider(RarityOverrideProvider::new)
             .provider(AffixLootEntryProvider::new)
             .provider(AffixProvider::new)
             .provider(GemProvider::new)
@@ -174,6 +174,7 @@ public class Apotheosis {
             .provider(TwilightAffixLootProvider::new)
             .provider(TwilightGearSetProvider::new)
             .provider(TwilightInvaderProvider::new)
+            .provider(ApothDataMapProvider::new)
             .build(e);
 
         Object2IntOpenHashMap<String> map = (Object2IntOpenHashMap<String>) DataProvider.FIXED_ORDER_FIELDS;
@@ -202,34 +203,6 @@ public class Apotheosis {
 
         // Place gem bonus lists below everything else in the gem file.
         map.put("bonuses", 5);
-    }
-
-    @SubscribeEvent
-    @SuppressWarnings({ "unchecked", "deprecation" })
-    public void imc(InterModProcessEvent e) {
-        e.getIMCStream().forEach(msg -> {
-            switch (msg.method().toLowerCase(Locale.ROOT)) {
-                // Payload: Map.Entry<Item, String> where the string is a LootCategory ID.
-                case "loot_category_override" -> {
-                    try {
-                        var categoryOverride = (Map.Entry<Item, String>) msg.messageSupplier().get();
-                        Item item = categoryOverride.getKey();
-                        LootCategory cat = LootCategory.byId(categoryOverride.getValue());
-                        if (cat == null) throw new NullPointerException("Invalid loot category ID: " + categoryOverride.getValue());
-                        Apotheosis.IMC_TYPE_OVERRIDES.put(item, cat);
-                        Apotheosis.LOGGER.info("Mod {} has overriden the loot category of {} to {}.", msg.senderModId(), item, cat.getName());
-                        break;
-                    }
-                    catch (Exception ex) {
-                        Apotheosis.LOGGER.error(ex.getMessage());
-                        ex.printStackTrace();
-                    }
-                }
-                default -> {
-                    Apotheosis.LOGGER.error("Unknown or invalid IMC Message: {}", msg);
-                }
-            }
-        });
     }
 
     public static void loadConfig(boolean firstLoad) {

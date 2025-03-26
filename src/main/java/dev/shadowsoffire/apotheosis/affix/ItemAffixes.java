@@ -24,7 +24,9 @@ import net.minecraft.world.item.ItemStack;
  */
 public final class ItemAffixes {
 
-    public static final Codec<ItemAffixes> CODEC = Codec.unboundedMap(AffixRegistry.INSTANCE.holderCodec(), Codec.floatRange(0, 1)).xmap(Object2FloatOpenHashMap::new, Function.identity()).xmap(ItemAffixes::new, i -> i.affixes);
+    public static final Codec<ItemAffixes> CODEC = Codec.unboundedMap(AffixRegistry.INSTANCE.holderCodec(), Codec.floatRange(0, Affix.MAX_LEVEL))
+        .xmap(Object2FloatOpenHashMap::new, Function.identity())
+        .xmap(ItemAffixes::new, i -> i.affixes);
 
     public static final StreamCodec<ByteBuf, ItemAffixes> STREAM_CODEC = StreamCodec.composite(
         ByteBufCodecs.map(Object2FloatOpenHashMap::new, AffixRegistry.INSTANCE.holderStreamCodec(), ByteBufCodecs.FLOAT),
@@ -40,7 +42,7 @@ public final class ItemAffixes {
 
         for (Entry<DynamicHolder<Affix>> entry : affixes.object2FloatEntrySet()) {
             float level = entry.getFloatValue();
-            if (level < 0 || level > 255) {
+            if (level < 0 || level > Affix.MAX_LEVEL) {
                 throw new IllegalArgumentException("Affix " + entry.getKey() + " has invalid level " + level);
             }
         }
@@ -97,27 +99,31 @@ public final class ItemAffixes {
             this.affixes.putAll(base.affixes);
         }
 
-        public void put(DynamicHolder<Affix> affix, float level) {
+        public Builder put(DynamicHolder<Affix> affix, float level) {
             if (level <= 0) {
                 this.affixes.removeFloat(affix);
             }
             else {
-                this.affixes.put(affix, Math.clamp(level, 0, 1));
+                this.affixes.put(affix, Math.clamp(level, 0, Affix.MAX_LEVEL));
             }
+            return this;
         }
 
-        public void upgrade(DynamicHolder<Affix> affix, float level) {
+        public Builder upgrade(DynamicHolder<Affix> affix, float level) {
             if (level > 0) {
-                this.affixes.merge(affix, Math.clamp(level, 0, 1), Float::max);
+                this.affixes.merge(affix, Math.clamp(level, 0, Affix.MAX_LEVEL), Float::max);
             }
+            return this;
         }
 
-        public void remove(DynamicHolder<Affix> affix) {
+        public Builder remove(DynamicHolder<Affix> affix) {
             this.affixes.removeFloat(affix);
+            return this;
         }
 
-        public void removeIf(Predicate<DynamicHolder<Affix>> filter) {
+        public Builder removeIf(Predicate<DynamicHolder<Affix>> filter) {
             this.affixes.keySet().removeIf(filter);
+            return this;
         }
 
         public float getLevel(DynamicHolder<Affix> key) {

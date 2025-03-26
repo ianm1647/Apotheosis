@@ -1,3 +1,27 @@
+## 8.2.1
+* Fixed Potion Charms not working in Curio slots.
+  * Also re-enabled the "Charms in Curios Only" config option.
+* Updated to Apothic Attributes 2.7.0.
+  * `LootCategory` has been updated to use the new `EntityEquipmentSlot` API.
+  * This permits addons to create categories (and subsequently, gems/affixes) for non-vanilla equipment slots.
+
+## 8.2.0
+* Updated the Chronicle of Shadows to have information regarding all the changes since 8.0.0.
+  * A new section regarding World Tiers has been added.
+  * Gems have been migrated out of Affix Loot and into their own section.
+  * Mentions of Bosses and Minibosses have been updated to Invaders and Elites (respectively).
+  * Mentions of Rectification have been removed.
+  * Missing textures have been updated to reflect the modid changes from the modules.
+* ianm1647: Updated Affix and Gem hooks to be generic against all Projectiles instead of only `AbstractArrow`.
+* RuyaSavascisi: Updated Turkish translation.
+* Fixed an issue where affix item data components could go out of sync on the client and server.
+  * This was causing issues in certain storage systems (i.e. AE/RS) which would result in the item(s) being unremovable.
+* Refactored Loot Category to use a proper registry.
+  * Loot Categories are now namespaced. For datapack compatibility, the default namespace is inferred as `apotheosis`.
+* Affixes and Gems which supply custom right-click effects will now trigger after the base item has attempted its right-click effects.
+* Invader Spawn Rules have been migrated to a Data Map (instead of being in the config file).
+* Loot Category Overrides have been migrated to a Data Map (instead of being in the config file).
+
 ## 8.1.3
 * Refactored the `Exclusion` class (used by Invaders/Elites) into `SpawnCondition`.
   * The new class has full schema documentation, as well as more logical operators than the prior impl.

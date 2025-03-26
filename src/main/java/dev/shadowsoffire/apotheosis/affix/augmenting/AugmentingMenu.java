@@ -10,9 +10,11 @@ import dev.shadowsoffire.apotheosis.Apoth.Menus;
 import dev.shadowsoffire.apotheosis.affix.Affix;
 import dev.shadowsoffire.apotheosis.affix.AffixHelper;
 import dev.shadowsoffire.apotheosis.affix.AffixInstance;
+import dev.shadowsoffire.apotheosis.affix.AffixRegistry;
 import dev.shadowsoffire.apotheosis.affix.ItemAffixes;
 import dev.shadowsoffire.apotheosis.loot.LootController;
 import dev.shadowsoffire.apotheosis.net.RerollResultPayload;
+import dev.shadowsoffire.apotheosis.tiers.GenContext;
 import dev.shadowsoffire.placebo.cap.InternalItemHandler;
 import dev.shadowsoffire.placebo.menu.BlockEntityMenu;
 import dev.shadowsoffire.placebo.reload.DynamicHolder;
@@ -21,6 +23,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.random.WeightedEntry;
+import net.minecraft.util.random.WeightedEntry.Wrapper;
+import net.minecraft.util.random.WeightedRandom;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -100,7 +105,7 @@ public class AugmentingMenu extends BlockEntityMenu<AugmentingTableTile> {
                     }
                 }
 
-                AffixHelper.applyAffix(mainItem, inst.withNewLevel(inst.level() + 0.25F));
+                AffixHelper.applyAffix(mainItem, inst.withNewLevel(Math.min(inst.level() + 0.25F, Affix.STANDARD_MAX_LEVEL)));
                 this.slots.get(0).set(mainItem);
                 player.level().playSound(null, this.pos, SoundEvents.EVOKER_CAST_SPELL, SoundSource.PLAYERS, 1F, player.level().random.nextFloat() * 0.25F + 1F);
                 player.level().playSound(null, this.pos, SoundEvents.AMETHYST_CLUSTER_STEP, SoundSource.PLAYERS, 0.34F, player.level().random.nextFloat() * 0.2F + 0.8F);
@@ -128,7 +133,15 @@ public class AugmentingMenu extends BlockEntityMenu<AugmentingTableTile> {
                 ItemAffixes.Builder builder = mainItem.getOrDefault(Components.AFFIXES, ItemAffixes.EMPTY).toBuilder();
                 builder.remove(inst.affix());
 
-                DynamicHolder<Affix> newAffix = alternatives.get(player.getRandom().nextInt(alternatives.size()));
+                GenContext ctx = GenContext.forPlayer(player);
+                List<WeightedEntry.Wrapper<Affix>> weighted = getWeightedAffixes(alternatives, ctx);
+                DynamicHolder<Affix> newAffix = WeightedRandom.getRandomItem(player.getRandom(), weighted).map(Wrapper::data).map(AffixRegistry.INSTANCE::holder).orElse(null);
+
+                // We need to fallback to a random affix if all the weights were zero.
+                if (newAffix == null) {
+                    newAffix = alternatives.get(player.getRandom().nextInt(alternatives.size()));
+                }
+
                 builder.upgrade(newAffix, player.getRandom().nextFloat());
 
                 AffixHelper.setAffixes(mainItem, builder.build());
@@ -138,6 +151,7 @@ public class AugmentingMenu extends BlockEntityMenu<AugmentingTableTile> {
                 player.level().playSound(null, this.pos, SoundEvents.SMITHING_TABLE_USE, SoundSource.PLAYERS, 0.45F, player.level().random.nextFloat() * 0.75F + 0.5F);
                 this.broadcastChanges();
                 PacketDistributor.sendToPlayer((ServerPlayer) this.player, new RerollResultPayload(newAffix));
+                this.tile.setChanged();
                 return true;
             }
         }
@@ -173,7 +187,11 @@ public class AugmentingMenu extends BlockEntityMenu<AugmentingTableTile> {
     }
 
     protected static List<DynamicHolder<Affix>> computeAlternatives(ItemStack stack, AffixInstance selected) {
-        return LootController.getAvailableAffixes(stack, selected.getRarity(), selected.getAffix().definition().type()).toList();
+        return LootController.getAlternativeAffixes(stack, selected.getRarity(), selected.affix()).toList();
+    }
+
+    protected static List<WeightedEntry.Wrapper<Affix>> getWeightedAffixes(List<DynamicHolder<Affix>> affixes, GenContext ctx) {
+        return affixes.stream().map(a -> a.get().<Affix>wrap(ctx.tier(), ctx.luck())).toList();
     }
 
 }

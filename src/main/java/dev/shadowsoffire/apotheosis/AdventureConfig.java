@@ -1,16 +1,9 @@
 package dev.shadowsoffire.apotheosis;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 
-import org.apache.commons.lang3.tuple.Pair;
-
-import dev.shadowsoffire.apotheosis.loot.LootCategory;
-import dev.shadowsoffire.apotheosis.mobs.util.SurfaceType;
 import dev.shadowsoffire.placebo.config.Configuration;
 import dev.shadowsoffire.placebo.network.PayloadProvider;
 import net.minecraft.ResourceLocationException;
@@ -33,8 +26,6 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 public class AdventureConfig {
 
     public static final List<ResourceLocation> DIM_WHITELIST = new ArrayList<>();
-    public static final Map<Item, LootCategory> TYPE_OVERRIDES = new HashMap<>(); // TODO: Turn this into a datamap or a collection of item tags.
-    public static final Map<ResourceLocation, Pair<Float, SurfaceType>> BOSS_SPAWN_RULES = new HashMap<>();
 
     public static float augmentedMobChance = 0.075F;
 
@@ -70,31 +61,6 @@ public class AdventureConfig {
     public static void load(Configuration c) {
         c.setTitle("Apotheosis Adventure Module Config");
 
-        TYPE_OVERRIDES.clear();
-        TYPE_OVERRIDES.putAll(Apotheosis.IMC_TYPE_OVERRIDES);
-        String[] overrides = c.getStringList("Equipment Type Overrides", "affixes", new String[] { "minecraft:iron_sword|melee_weapon", "minecraft:shulker_shell|none" },
-            "A list of type overrides for the affix loot system.  Format is <itemname>|<type>.\nValid types are: none, melee_weapon, trident, shield, breaker, bow\nSynced.");
-        for (String s : overrides) {
-            String[] split = s.split("\\|");
-            try {
-                LootCategory type = LootCategory.byId(split[1].toLowerCase(Locale.ROOT));
-                if (type.isArmor()) {
-                    throw new UnsupportedOperationException("Cannot override an item to an armor type.");
-                }
-
-                Item item = BuiltInRegistries.ITEM.get(ResourceLocation.parse(split[0]));
-                if (item == Items.AIR) {
-                    throw new UnsupportedOperationException("Unknown item: " + split[0]);
-                }
-
-                TYPE_OVERRIDES.put(item, type);
-            }
-            catch (Exception e) {
-                Apotheosis.LOGGER.error("Invalid type override entry: " + s + " will be ignored!");
-                e.printStackTrace();
-            }
-        }
-
         randomAffixItem = c.getFloat("Random Affix Chance", "affixes", randomAffixItem, 0, 1, "The chance that a naturally spawned mob will be granted an affix item. 0 = 0%, 1 = 100%\nServer-authoritative.");
         cleaveHitsPlayers = c.getBoolean("Cleave Players", "affixes", cleaveHitsPlayers, "If affixes that cleave can hit players (excluding the user).\nServer-authoritative.");
 
@@ -125,29 +91,7 @@ public class AdventureConfig {
         bossAutoAggro = c.getBoolean("Boss Auto-Aggro", "bosses", bossAutoAggro, "If true, invading bosses will automatically target the closest player.\nServer-authoritative.");
         bossGlowOnSpawn = c.getBoolean("Boss Glowing On Spawn", "bosses", bossGlowOnSpawn, "If true, bosses will glow when they spawn.\nServer-authoritative.");
 
-        String[] dims = c.getStringList("Boss Spawn Dimensions", "bosses",
-            new String[] {
-                "minecraft:overworld|0.018|NEEDS_SKY",
-                "minecraft:the_nether|0.025|ANY",
-                "minecraft:the_end|0.018|SURFACE_OUTER_END",
-                "twilightforest:twilight_forest|0.05|NEEDS_SURFACE"
-            },
-            "Dimensions where bosses can spawn naturally, spawn chance, and spawn rules.\nFormat is dimname|chance|rule, chance is a float from 0..1."
-                + "\nValid rules are visible here https://github.com/Shadows-of-Fire/Apotheosis/blob/1.19/src/main/java/shadows/apotheosis/adventure/boss/BossEvents.java#L174C27-L174C27\nServer-authoritative.");
-
-        BOSS_SPAWN_RULES.clear();
-        for (String s : dims) {
-            try {
-                String[] split = s.split("\\|");
-                BOSS_SPAWN_RULES.put(ResourceLocation.parse(split[0]), Pair.of(Float.parseFloat(split[1]), SurfaceType.valueOf(split[2].toUpperCase(Locale.ROOT))));
-            }
-            catch (Exception e) {
-                Apotheosis.LOGGER.error("Invalid boss spawn rules: " + s + " will be ignored");
-                e.printStackTrace();
-            }
-        }
-
-        dims = c.getStringList("Generation Dimension Whitelist", "worldgen", new String[] { "overworld" }, "The dimensions that the deadly module will generate in.\nServer-authoritative.");
+        String[] dims = c.getStringList("Generation Dimension Whitelist", "worldgen", new String[] { "overworld" }, "The dimensions that Apotheosis's worldgen will generate in.\nServer-authoritative.");
         DIM_WHITELIST.clear();
         for (String s : dims) {
             try {
@@ -166,6 +110,8 @@ public class AdventureConfig {
         upgradeLevelCost = c.getInt("Upgrade Level Cost", "augmenting", upgradeLevelCost, 0, 65536, "The number of experience levels it costs to upgrade an affix in the Augmenting Table.\nSynced.");
         rerollSigilCost = c.getInt("Reroll Sigil Cost", "augmenting", rerollSigilCost, 0, 64, "The number of Sigils of Enhancement it costs to reroll an affix in the Augmenting Table.\nSynced.");
         rerollLevelCost = c.getInt("Reroll Level Cost", "augmenting", rerollLevelCost, 0, 65536, "The number of experience levels it costs to reroll an affix in the Augmenting Table.\nSynced.");
+
+        charmsInCuriosOnly = c.getBoolean("Restrict Charms to Curios", "potion_charms", charmsInCuriosOnly, "If Potion Charms will only work when in a curios slot, instead of in the inventory.");
     }
 
     public static boolean canGenerateIn(WorldGenLevel world) {
@@ -173,21 +119,21 @@ public class AdventureConfig {
         return DIM_WHITELIST.contains(key.location());
     }
 
-    public static record ConfigPayload(Map<Item, LootCategory> catOverrides, Item affixTorch, int upgradeSigilCost, int upgradeLevelCost, int rerollSigilCost, int rerollLevelCost) implements CustomPacketPayload {
+    public static record ConfigPayload(Item affixTorch, int upgradeSigilCost, int upgradeLevelCost, int rerollSigilCost, int rerollLevelCost, boolean charmsInCuriosOnly) implements CustomPacketPayload {
 
         public static final Type<ConfigPayload> TYPE = new Type<>(Apotheosis.loc("config"));
 
         public static final StreamCodec<RegistryFriendlyByteBuf, ConfigPayload> CODEC = StreamCodec.composite(
-            ByteBufCodecs.map(HashMap::new, ByteBufCodecs.registry(Registries.ITEM), LootCategory.STREAM_CODEC), ConfigPayload::catOverrides,
             ByteBufCodecs.registry(Registries.ITEM), ConfigPayload::affixTorch,
             ByteBufCodecs.VAR_INT, ConfigPayload::upgradeSigilCost,
             ByteBufCodecs.VAR_INT, ConfigPayload::upgradeLevelCost,
             ByteBufCodecs.VAR_INT, ConfigPayload::rerollSigilCost,
             ByteBufCodecs.VAR_INT, ConfigPayload::rerollLevelCost,
+            ByteBufCodecs.BOOL, ConfigPayload::charmsInCuriosOnly,
             ConfigPayload::new);
 
         public ConfigPayload() {
-            this(AdventureConfig.TYPE_OVERRIDES, AdventureConfig.torchItem, AdventureConfig.upgradeSigilCost, AdventureConfig.upgradeLevelCost, AdventureConfig.rerollSigilCost, AdventureConfig.rerollLevelCost);
+            this(AdventureConfig.torchItem, AdventureConfig.upgradeSigilCost, AdventureConfig.upgradeLevelCost, AdventureConfig.rerollSigilCost, AdventureConfig.rerollLevelCost, AdventureConfig.charmsInCuriosOnly);
         }
 
         @Override
@@ -209,8 +155,6 @@ public class AdventureConfig {
 
             @Override
             public void handle(ConfigPayload msg, IPayloadContext ctx) {
-                AdventureConfig.TYPE_OVERRIDES.clear();
-                AdventureConfig.TYPE_OVERRIDES.putAll(msg.catOverrides);
                 AdventureConfig.torchItem = msg.affixTorch();
                 AdventureConfig.upgradeSigilCost = msg.upgradeSigilCost;
                 AdventureConfig.upgradeLevelCost = msg.upgradeLevelCost;
@@ -230,7 +174,7 @@ public class AdventureConfig {
 
             @Override
             public String getVersion() {
-                return "1";
+                return "3";
             }
 
         }
